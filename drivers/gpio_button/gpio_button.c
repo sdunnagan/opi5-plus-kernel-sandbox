@@ -15,6 +15,7 @@
 // - Provides poll() support for event-driven userspace applications
 // - Includes robust error handling and resource cleanup
 //-----------------------------------------------------------------------------
+
 #include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/gpio/consumer.h>

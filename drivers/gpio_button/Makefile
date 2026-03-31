@@ -1,7 +1,7 @@
 #------------------------------------------------------------------------------
-# File:      drivers/gpio_button/Makefile
+# File:        drivers/gpio_button/Makefile
 #
-# Drivers:  Builds/installs the gpio_button module.
+# Description: Builds/installs the gpio_button module.
 #------------------------------------------------------------------------------
 
 KDIR   ?= $(KERNEL_SRC_DIR)

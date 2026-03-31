@@ -18,18 +18,18 @@ The project targets **aarch64 Fedora systems** running either upstream or custom
 
 ## Project Structure
 
-The project consists of two userspace applications and one kernel module:
+The project consists of userspace applications and kernel modules:
 
 - **blinky**  
   A minimal userspace application that toggles an LED directly via the GPIO character device using **libgpiod v2**.  
   It serves as a sanity check for GPIO wiring, permissions, and the kernel GPIO stack.
 
+- **button**  
+  A userspace application that communicates with the `gpio_button` driver, exercising the full path from hardware interrupt, through the kernel driver, and up into userspace.
+
 - **gpio_button (kernel module)**  
   A custom GPIO driver defined via a Device Tree overlay.  
   It handles a button interrupt in kernel space and controls an associated LED.
-
-- **button**  
-  A userspace application that communicates with the `gpio_button` driver, exercising the full path from hardware interrupt, through the kernel driver, and up into userspace.
 
 ---
 
@@ -107,31 +107,35 @@ $ tree
 
 ---
 
-## Install Applications and Driver
+## Install the Project
 
 ```sh
 $ TARGET_HOST=<orangepi5plus_host_name>
 $ make install-remote   TARGET_HOST=$USER@$TARGET_HOST   TARGET_PREFIX=/usr/local   TARGET_SSH_OPTS="-o StrictHostKeyChecking=no"   TARGET_SUDO="sudo -n"
 ```
 
-Verify:
+Verify on the target:
 ```sh
 $ which blinky
 $ which button
 $ modinfo gpio_button
 $ lsmod | grep gpio_button
+$ systemctl is-enabled opi5-sandbox.service
+$ systemctl is-active opi5-sandbox.service
+
 ```
 
 ---
 
 ## Merge the Custom Device Tree Overlay
 
+SCP .dtbo files to the target:
 ```sh
 $ scp drivers/gpio_button/overlay/gpio_button.overlay.dtbo $USER@$TARGET_HOST:~
 $ scp drivers/gpio_button/overlay/i2c_enable.overlay.dtbo $USER@$TARGET_HOST:~
 ```
 
-Merge the custom device tree overlay on the target:
+On the target, merge the custom device dree overlay:
 ```sh
 $ BASE=/boot/dtb/rockchip/rk3588-orangepi-5-plus.dtb
 $ sudo cp -a "$BASE" "$BASE.$(date +%F-%H%M%S)"
@@ -168,8 +172,14 @@ $ grep -nA5 -B2 "gpio-button" /tmp/running.dts | sed -n '1,120p'
 
 ---
 
-## Manual GPIO Testing
+## Manual GPIO driver and application testing
 
+For manual testing, temporarily stop the systemd service:
+```sh
+$ sudo systemctl stop opi5-sandbox.service
+```
+
+Manually test the GPIO driver:
 ```sh
 $ sudo usermod -a -G gpio $USER
 $ sudo reboot
@@ -180,10 +190,7 @@ $ gpioset -c gpiochip1 1=1
 $ sudo gpioget -c gpiochip3 14
 ```
 
----
-
-## Manual Application Testing
-
+Manually test the GPIO **blinky** and **button** applications:
 ```sh
 $ blinky -D -c gpiochip1 -l 1 -i 250
 $ sudo button
@@ -193,10 +200,16 @@ $ sudo button
 
 ## Uninstall
 
+On the target:
 ```sh
-$ pkill blinky
-$ pkill button
+$ sudo pkill blinky
+$ sudo pkill button
 $ sudo rmmod gpio_button
+```
+
+On the build host:
+```sh
+$ TARGET_HOST=<orangepi5plus_host_name>
 $ make uninstall-remote   TARGET_HOST=$USER@$TARGET_HOST   TARGET_PREFIX=/usr/local   TARGET_SSH_OPTS="-o StrictHostKeyChecking=no"   TARGET_SUDO="sudo -n"
 $ make clean
 ```

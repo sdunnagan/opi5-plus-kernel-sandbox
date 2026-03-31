@@ -1,15 +1,15 @@
 #------------------------------------------------------------------------------
 # File:         Makefile
 #
-# Description:  Builds and installs apps, drivers, and systemd units for
-#               Orange Pi 5 Plus / aarch64 (or similar).
+# Description:  Builds and installs apps, drivers, and the consolidated
+#               sandbox service for Orange Pi 5 Plus / aarch64 (or similar).
 #
 # Notes:
 # ------
 # - Export two env vars that point to your kernel workspace:
 #   * KERNEL_SRC_DIR:   the kernel source tree (srctree)
 #   * KERNEL_BUILD_DIR: the kernel build tree (objtree, i.e. O=)
-# - Drivers will build as external modules against the O= tree.
+# - Drivers build as external modules against the O= tree.
 #------------------------------------------------------------------------------
 
 SUBDIRS := apps drivers
@@ -19,12 +19,14 @@ TARGET_SSH_OPTS ?=
 TARGET_SUDO     ?= sudo
 TARGET_PREFIX   ?= /usr/local
 
-# systemd unit install location on target
 SYSTEMD_UNIT_DIR ?= /etc/systemd/system
+LIBEXEC_DIR      ?= /usr/local/libexec
 
-# Units shipped by this project
-SYSTEMD_UNITS := gpio-button.service blinky.service
+SYSTEMD_UNITS := opi5-sandbox.service
 SYSTEMD_UNIT_SRC := $(addprefix systemd/,$(SYSTEMD_UNITS))
+
+SANDBOX_SCRIPT := opi5-sandbox-start.sh
+SANDBOX_SCRIPT_SRC := scripts/$(SANDBOX_SCRIPT)
 
 ifndef KERNEL_SRC_DIR
 $(error KERNEL_SRC_DIR not set; export it or pass on the make command line)
@@ -60,7 +62,8 @@ prepare-kbuild:
 print-kernel-release:
 	@$(MAKE) -s -C "$(KERNEL_SRC_DIR)" O="$(KERNEL_BUILD_DIR)" kernelrelease
 
-# ---- Local installs (optional) ------------------------------------------------
+# ---- Local installs (optional) -----------------------------------------------
+
 install: install-apps install-drivers install-services
 
 install-apps:
@@ -71,59 +74,74 @@ install-drivers:
 
 install-services:
 	@echo "Local install of systemd units is not implemented (use install-remote)."
-	@echo "If you want it, we can add a local install that copies to $(SYSTEMD_UNIT_DIR)."
+	@echo "If you want it, we can add a local install that copies to $(SYSTEMD_UNIT_DIR)"
+	@echo "and $(LIBEXEC_DIR)."
 
 # ---- Remote installs ----------------------------------------------------------
+
 install-remote: install-remote-apps install-remote-drivers install-remote-services
 
 install-remote-apps:
 	$(MAKE) -C apps install-remote \
-		TARGET_HOST="$(TARGET_HOST)" TARGET_SSH_OPTS="$(TARGET_SSH_OPTS)" \
-		TARGET_SUDO="$(TARGET_SUDO)" TARGET_PREFIX="$(TARGET_PREFIX)"
+		TARGET_HOST="$(TARGET_HOST)" \
+		TARGET_SSH_OPTS="$(TARGET_SSH_OPTS)" \
+		TARGET_SUDO="$(TARGET_SUDO)" \
+		TARGET_PREFIX="$(TARGET_PREFIX)"
 
 install-remote-drivers:
 	$(MAKE) -C drivers install-remote \
-		TARGET_HOST="$(TARGET_HOST)" TARGET_SSH_OPTS="$(TARGET_SSH_OPTS)" \
+		TARGET_HOST="$(TARGET_HOST)" \
+		TARGET_SSH_OPTS="$(TARGET_SSH_OPTS)" \
 		TARGET_SUDO="$(TARGET_SUDO)"
 
-install-remote-services: $(SYSTEMD_UNIT_SRC)
+install-remote-services: $(SYSTEMD_UNIT_SRC) $(SANDBOX_SCRIPT_SRC)
 	@if [ -z "$(TARGET_HOST)" ]; then echo "ERROR: TARGET_HOST is required"; exit 2; fi
-	@echo ">> Installing systemd units to $(TARGET_HOST): $(SYSTEMD_UNITS)"
+	@echo ">> Installing sandbox launcher script to $(TARGET_HOST): $(SANDBOX_SCRIPT)"
+	@ssh $(TARGET_SSH_OPTS) "$(TARGET_HOST)" '$(TARGET_SUDO) mkdir -p "$(LIBEXEC_DIR)"'
+	@cat "$(SANDBOX_SCRIPT_SRC)" | ssh $(TARGET_SSH_OPTS) "$(TARGET_HOST)" \
+		'$(TARGET_SUDO) install -m 0755 /dev/stdin "$(LIBEXEC_DIR)/$(SANDBOX_SCRIPT)"'
+
+	@echo ">> Installing systemd unit to $(TARGET_HOST): $(SYSTEMD_UNITS)"
 	@ssh $(TARGET_SSH_OPTS) "$(TARGET_HOST)" '$(TARGET_SUDO) mkdir -p "$(SYSTEMD_UNIT_DIR)"'
 	@for u in $(SYSTEMD_UNITS); do \
 		echo "   - $$u"; \
 		cat "systemd/$$u" | ssh $(TARGET_SSH_OPTS) "$(TARGET_HOST)" \
 			'$(TARGET_SUDO) install -m 0644 /dev/stdin "$(SYSTEMD_UNIT_DIR)/'$$u'"'; \
 	done
+
 	@ssh $(TARGET_SSH_OPTS) "$(TARGET_HOST)" '$(TARGET_SUDO) systemctl daemon-reload'
 	@for u in $(SYSTEMD_UNITS); do \
-		ssh $(TARGET_SSH_OPTS) "$(TARGET_HOST)" '$(TARGET_SUDO) systemctl enable '$$u' >/dev/null'; \
-		ssh $(TARGET_SSH_OPTS) "$(TARGET_HOST)" '$(TARGET_SUDO) systemctl try-restart '$$u' >/dev/null 2>&1 || true'; \
+		ssh $(TARGET_SSH_OPTS) "$(TARGET_HOST)" '$(TARGET_SUDO) systemctl enable --now '$$u' >/dev/null'; \
 	done
-	@echo ">> systemd units installed + enabled."
+	@echo ">> Installed and started opi5-sandbox.service."
 
 # ---- Remote uninstalls --------------------------------------------------------
+
 uninstall-remote: uninstall-remote-services uninstall-remote-apps uninstall-remote-drivers
 
 uninstall-remote-apps:
 	$(MAKE) -C apps uninstall-remote \
-		TARGET_HOST="$(TARGET_HOST)" TARGET_SSH_OPTS="$(TARGET_SSH_OPTS)" \
-		TARGET_SUDO="$(TARGET_SUDO)" TARGET_PREFIX="$(TARGET_PREFIX)"
+		TARGET_HOST="$(TARGET_HOST)" \
+		TARGET_SSH_OPTS="$(TARGET_SSH_OPTS)" \
+		TARGET_SUDO="$(TARGET_SUDO)" \
+		TARGET_PREFIX="$(TARGET_PREFIX)"
 
 uninstall-remote-drivers:
 	$(MAKE) -C drivers uninstall-remote \
-		TARGET_HOST="$(TARGET_HOST)" TARGET_SSH_OPTS="$(TARGET_SSH_OPTS)" \
+		TARGET_HOST="$(TARGET_HOST)" \
+		TARGET_SSH_OPTS="$(TARGET_SSH_OPTS)" \
 		TARGET_SUDO="$(TARGET_SUDO)"
 
 uninstall-remote-services:
 	@if [ -z "$(TARGET_HOST)" ]; then echo "ERROR: TARGET_HOST is required"; exit 2; fi
-	@echo ">> Uninstalling systemd units from $(TARGET_HOST): $(SYSTEMD_UNITS)"
+	@echo ">> Uninstalling sandbox service from $(TARGET_HOST): $(SYSTEMD_UNITS)"
 	@for u in $(SYSTEMD_UNITS); do \
 		ssh $(TARGET_SSH_OPTS) "$(TARGET_HOST)" '$(TARGET_SUDO) systemctl disable --now '$$u' >/dev/null 2>&1 || true'; \
 		ssh $(TARGET_SSH_OPTS) "$(TARGET_HOST)" '$(TARGET_SUDO) rm -f "$(SYSTEMD_UNIT_DIR)/'$$u'" || true'; \
 	done
+	@ssh $(TARGET_SSH_OPTS) "$(TARGET_HOST)" '$(TARGET_SUDO) rm -f "$(LIBEXEC_DIR)/$(SANDBOX_SCRIPT)" || true'
 	@ssh $(TARGET_SSH_OPTS) "$(TARGET_HOST)" '$(TARGET_SUDO) systemctl daemon-reload'
-	@echo ">> systemd units removed."
+	@echo ">> Removed opi5-sandbox.service and launcher script."
 
 clean:
 	@for d in $(SUBDIRS); do \
@@ -131,8 +149,10 @@ clean:
 		$(MAKE) -C $$d clean; \
 	done
 
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Device-tree overlay (compile-time) convenience targets
+# ------------------------------------------------------------------------------
+
 dt-overlay:
 	$(MAKE) -C drivers/gpio_button/overlay
 

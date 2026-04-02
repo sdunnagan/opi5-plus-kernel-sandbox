@@ -85,14 +85,15 @@ $ git clone https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git "
 $ mkdir $KERNEL_BUILD_DIR
 ```
 
-Copy the kernel config from the Orange Pi 5 Plus:
+Clean, configure and build:
 ```sh
-$ ssh <orangepi5plus_host_name> 'cat /boot/config-$(uname -r)' > "$KERNEL_BUILD_DIR/.config"
+$ scp sdunnaga@orthanc:/boot/config-6.17.6-200.fc42.aarch64 "$KERNEL_BUILD_DIR/.config"
+$ upstream-kernel-builder -l chopin -a aarch64 -C -c -k ~/projects/opi5plus/upstream_kernel_config_opi5plus.txt -B
 ```
 
-Build and install your custom upstream kernel:
+Install on target:
 ```sh
-$ upstream_kernel_builder -s <kernel_id> -t <orangepi5plus_host_name> -a aarch64 -f -i grub -b
+$ upstream-kernel-builder -l chopin -t orthanc -i grub
 ```
 
 ---

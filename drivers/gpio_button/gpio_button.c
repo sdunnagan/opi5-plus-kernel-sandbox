@@ -25,7 +25,6 @@
 #include <linux/poll.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
-#include <linux/of_gpio.h>
 #include <linux/jiffies.h>
 #include <linux/delay.h>
 #include <linux/sysfs.h>

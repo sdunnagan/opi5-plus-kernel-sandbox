@@ -74,26 +74,94 @@ $ sudo dnf install libgpiod-devel dtc
 
 Install packages on the Orange Pi 5 Plus:
 ```sh
-# sudo dnf install -y libgpiod libgpiod-utils dtc uboot-tools
+$ sudo dnf install -y libgpiod libgpiod-utils dtc uboot-tools
 ```
 
 Prepare an upstream kernel build workspace:
 ```sh
-$ export KERNEL_SRC_DIR="/home/$UESR/projects/upstream_kernel_op5"
-$ export KERNEL_BUILD_DIR="/home/$USER/projects/build_upstream_kernel_op5"
+$ export KERNEL_SRC_DIR="/home/$USER/projects/opi5plus/upstream_kernel"
+$ export KERNEL_BUILD_DIR="/home/$USER/projects/opi5plus/build_upstream_kernel"
 $ git clone https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git "$KERNEL_SRC_DIR"
-$ mkdir $KERNEL_BUILD_DIR
+$ mkdir -p "$KERNEL_BUILD_DIR"
 ```
 
-Clean, configure and build:
+Seed the build config from the Orange Pi 5 Plus:
 ```sh
 $ scp sdunnaga@orthanc:/boot/config-6.17.6-200.fc42.aarch64 "$KERNEL_BUILD_DIR/.config"
-$ upstream-kernel-builder -l chopin -a aarch64 -C -c -k ~/projects/opi5plus/upstream_kernel_config_opi5plus.txt -B
 ```
 
-Install on target:
+Configure and build the custom upstream kernel:
 ```sh
-$ upstream-kernel-builder -l chopin -t orthanc -i grub
+$ ~/projects/kernel-builder/upstream-kernel-builder     -p opi5plus     -c -b     -k ~/projects/opi5plus/upstream_kernel_config_opi5plus.txt     -l florence
+```
+
+The build artifacts will be staged in:
+```sh
+$KERNEL_BUILD_DIR/deploy/
+$KERNEL_BUILD_DIR/modules_staging/
+```
+
+Set an environment variable for the custom kernel release:
+```sh
+$ export KREL="7.0.0-florence+"
+```
+
+Copy build artifacts to the Orange Pi 5 Plus:
+```sh
+$ rsync -av "$KERNEL_BUILD_DIR/deploy/Image-upstream-$KREL"     sdunnaga@orthanc:~/Downloads/
+$ rsync -av "$KERNEL_BUILD_DIR/modules_staging/lib/modules/$KREL/"     sdunnaga@orthanc:~/Downloads/modules-$KREL/
+$ rsync -av "$KERNEL_BUILD_DIR/deploy/dt
+```
+
+On the Orange Pi 5 Plus, install modules:
+```sh
+$ cd ~/Downloads/
+$ sudo rsync -av "modules-$KREL/" "/lib/modules/$KREL/"
+$ sudo chown -R root:root "/lib/modules/$KREL"
+$ sudo depmod -a "$KREL"
+```
+
+Install the kernel image to /boot:
+```sh
+$ sudo install -m 0755 -o root -g root     "$HOME/Downloads/Image-upstream-$KREL"     "/boot/vmlinuz-$KREL"
+```
+
+Rebuild the initramfs:
+```sh
+$ sudo dracut -f "/boot/initramfs-$KREL.img" "$KREL"
+```
+
+Install DTBs:
+```sh
+$ sudo cp -a "$HOME/Downloads/dtbs" "/boot/dtb-$KREL"
+$ sudo ln -sfn "dtb-$KREL" /boot/dtb
+```
+
+Create a new GRUB boot entry:
+```sh
+$ sudo grubby --copy-default     --add-kernel "/boot/vmlinuz-$KREL"     --initrd "/boot/initramfs-$KREL.img"     --title "Fedora Linux ($KREL)"
+```
+
+Set the custom kernel as the default boot entry:
+```sh
+$ sudo grubby --set-default "/boot/vmlinuz-$KREL"
+```
+
+Always show the GRUB menu:
+```sh
+$ sudo grub2-editenv - unset menu_auto_hide
+```
+
+Uninstall the custom upstream kernel:
+```sh
+$ sudo grubby --remove-kernel /boot/vmlinuz-$KREL
+$ sudo rm -f /boot/vmlinuz-$KREL
+$ sudo rm -f /boot/initramfs-$KREL.img
+$ sudo rm -f /boot/System.map-$KREL
+$ sudo rm -f /boot/config-$KREL
+$ sudo rm -rf /lib/modules/$KREL
+$ sudo rm -rf /boot/dtb-$KREL
+$ sudo depmod -a "$(uname -r)"
 ```
 
 ---
@@ -111,7 +179,7 @@ $ tree
 ## Install the Project
 
 ```sh
-$ TARGET_HOST=<orangepi5plus_host_name>
+$ TARGET_HOST=<target-name>
 $ make install-remote   TARGET_HOST=$USER@$TARGET_HOST   TARGET_PREFIX=/usr/local   TARGET_SSH_OPTS="-o StrictHostKeyChecking=no"   TARGET_SUDO="sudo -n"
 ```
 
@@ -161,6 +229,21 @@ $ sudo dtc -I dtb -O dts -o - /boot/dtb/rockchip/rk3588-orangepi-5-plus.dtb \
 
 Edit the BLS entry to add:
 ```
+devicetree /boot/dtb/rockchip/rk3588-orangepi-5-plus.dtb
+```
+
+For example:
+```
+root@orthanc:~# cat /boot/loader/entries/9de905683ada416ba7aee08d8033d6cc-7.0.0-florence+.conf
+title Fedora Linux (7.0.0-florence+) 42 (Server Edition)
+version 7.0.0-florence+
+linux /boot/vmlinuz-7.0.0-florence+
+initrd /boot/initramfs-7.0.0-florence+.img
+options root=UUID=656542dd-5917-48b1-94b6-0b110c0ccb09 ro console=ttyS2,1500000n8 console=tty1
+id fedora-20260416205942-7.0.0-florence+
+grub_users $grub_users
+grub_arg --unrestricted
+grub_class kernel-
 devicetree /boot/dtb/rockchip/rk3588-orangepi-5-plus.dtb
 ```
 
